@@ -122,7 +122,7 @@ app.post('/transactions/creer', async (req, res) => {
     const transaction = await Transaction.create({
       description,
       amount: montant,
-      currency: {'XOF'},
+      currency: { iso: 'XOF' },
       callback_url: process.env.FEDAPAY_CALLBACK_URL || 'https://socialproof.app/paiement-termine',
       customer: { email },
       custom_metadata: customMetadata,
