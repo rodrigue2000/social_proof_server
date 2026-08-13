@@ -1,4 +1,4 @@
-require('dotenv').config();
+ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
@@ -8,14 +8,12 @@ const { traiterTransactionApprouvee, traiterTransactionEchouee } = require('./tr
 
 const app = express();
 
-// --- Route de contrôle (Render l'utilise pour vérifier que le serveur est en vie) ---
+// --- Route de contrôle ---
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
 // --- Webhook FedaPay ---
-// IMPORTANT : cette route a besoin du corps brut (non parsé en JSON) pour
-// vérifier la signature. Elle doit donc être déclarée AVANT app.use(express.json()).
 app.post(
   '/webhooks/fedapay',
   express.raw({ type: 'application/json' }),
@@ -36,12 +34,14 @@ app.post(
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // On répond 200 tout de suite (recommandation FedaPay), puis on traite.
     res.status(200).json({ received: true });
 
     try {
       const transaction = event.entity;
       const customMetadata = transaction?.custom_metadata || {};
+      
+      // Ajouter l'ID de transaction pour le suivi
+      customMetadata.transactionId = transaction.id;
 
       switch (event.name) {
         case 'transaction.approved':
@@ -52,25 +52,19 @@ app.post(
           await traiterTransactionEchouee(customMetadata);
           break;
         default:
-          // transaction.created, transaction.updated, etc. — rien à faire.
           break;
       }
     } catch (err) {
-      // La réponse 200 est déjà partie vers FedaPay ; on logge pour investiguer.
       console.error('Erreur de traitement du webhook :', err);
     }
   }
 );
 
-// --- Middlewares pour le reste des routes ---
+// --- Middlewares ---
 app.use(cors());
 app.use(express.json());
 
 // --- Créer une transaction de paiement ---
-// body attendu :
-//   { type: 'premium', createurId, email }
-//   ou
-//   { type: 'demande', demandeurId, email, descriptionTache, secteurActivite, motsCles, montant }
 app.post('/transactions/creer', async (req, res) => {
   try {
     const { type, email } = req.body;
@@ -91,6 +85,7 @@ app.post('/transactions/creer', async (req, res) => {
       montant = 5000;
       description = 'Abonnement Premium Social Proof (1 an)';
       customMetadata = { type: 'premium', createurId };
+      
     } else if (type === 'demande') {
       const { demandeurId, descriptionTache, secteurActivite, motsCles, montant: montantDemande } = req.body;
 
@@ -100,8 +95,6 @@ app.post('/transactions/creer', async (req, res) => {
         });
       }
 
-      // On crée le document dès maintenant, en attente de paiement, pour ne
-      // pas perdre l'information si le paiement échoue ou est abandonné.
       const refDemande = await db.collection('demandes').add({
         demandeurId,
         descriptionTache,
@@ -115,6 +108,25 @@ app.post('/transactions/creer', async (req, res) => {
       montant = montantDemande;
       description = `Publication d'une demande Social Proof : ${descriptionTache}`;
       customMetadata = { type: 'demande', demandeId: refDemande.id, demandeurId };
+      
+    } else if (type === 'commande') {
+      const { demandeurId, commandeId, montant: montantCommande, description: descriptionCommande } = req.body;
+
+      if (!demandeurId || !commandeId || !montantCommande) {
+        return res.status(400).json({
+          erreur: 'Champs "demandeurId", "commandeId" et "montant" requis pour type=commande',
+        });
+      }
+
+      montant = montantCommande;
+      description = descriptionCommande || `Commande ${commandeId}`;
+      customMetadata = { 
+        type: 'commande', 
+        commandeId, 
+        demandeurId,
+        montant: montantCommande
+      };
+      
     } else {
       return res.status(400).json({ erreur: `Type de paiement inconnu : ${type}` });
     }
