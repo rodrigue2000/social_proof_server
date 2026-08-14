@@ -40,7 +40,6 @@ app.post(
       const transaction = event.entity;
       const customMetadata = transaction?.custom_metadata || {};
       
-      // Ajouter l'ID de transaction pour le suivi
       customMetadata.transactionId = transaction.id;
 
       switch (event.name) {
@@ -66,6 +65,8 @@ app.use(express.json());
 
 // --- Créer une transaction de paiement ---
 app.post('/transactions/creer', async (req, res) => {
+  console.log('📥 Requête reçue:', req.body); // 👈 AJOUT POUR DEBUG
+
   try {
     const { type, email } = req.body;
 
@@ -142,14 +143,15 @@ app.post('/transactions/creer', async (req, res) => {
 
     const { url } = await transaction.generateToken();
 
-    res.json({ url, transactionId: transaction.id });
+    // ✅ CONVERSION EN STRING
+    res.json({ url, transactionId: transaction.id.toString() });
   } catch (err) {
-    console.error('Erreur de création de transaction :', err);
-    res.status(500).json({ erreur: 'Impossible de créer la transaction de paiement' });
+    console.error('❌ Erreur de création de transaction :', err);
+    res.status(500).json({ erreur: err.message || 'Impossible de créer la transaction' });
   }
 });
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
-  console.log(`Serveur Social Proof démarré sur le port ${port}`);
+  console.log(`🚀 Serveur Social Proof démarré sur le port ${port}`);
 });
