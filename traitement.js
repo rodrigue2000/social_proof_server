@@ -1,4 +1,4 @@
-  const { db, admin } = require('./firebase');
+ const { db, admin } = require('./firebase');
 
 // --- Fonction utilitaire pour enregistrer les transactions ---
 async function _enregistrerTransaction(customMetadata, statut) {
@@ -20,10 +20,12 @@ async function _enregistrerTransaction(customMetadata, statut) {
       dateMiseAJour: admin.firestore.FieldValue.serverTimestamp(),
       metadata: customMetadata,
     }, { merge: true });
-    
+
     console.log(`📝 Transaction ${transactionId} enregistrée avec statut: ${statut}`);
+    return true;
   } catch (error) {
     console.error(`❌ Erreur enregistrement transaction ${transactionId}:`, error);
+    return false;
   }
 }
 
@@ -31,6 +33,9 @@ async function _enregistrerTransaction(customMetadata, statut) {
  * Point d'entrée unique appelé quand une transaction FedaPay est approuvée.
  */
 async function traiterTransactionApprouvee(customMetadata) {
+  console.log('✅ Transaction approuvée:', customMetadata);
+  
+  // Enregistrer la transaction
   await _enregistrerTransaction(customMetadata, 'reussi');
 
   const type = customMetadata?.type;
@@ -54,6 +59,9 @@ async function traiterTransactionApprouvee(customMetadata) {
  * Point d'entrée unique appelé quand une transaction FedaPay échoue.
  */
 async function traiterTransactionEchouee(customMetadata) {
+  console.log('❌ Transaction échouée:', customMetadata);
+  
+  // Enregistrer la transaction
   await _enregistrerTransaction(customMetadata, 'echoue');
 
   const type = customMetadata?.type;
@@ -121,10 +129,10 @@ async function traiterDemandeEchouee(customMetadata) {
   console.log(`❌ Demande ${demandeId} marquée comme paiement échoué`);
 }
 
-// --- Commande multitâches avec commission ---
+// --- Commande multitâches ---
 async function traiterCommandeApprouvee(customMetadata) {
   const { commandeId, demandeurId } = customMetadata;
-  
+
   if (!commandeId) {
     console.error('traiterCommandeApprouvee : commandeId manquant');
     return;
@@ -135,14 +143,14 @@ async function traiterCommandeApprouvee(customMetadata) {
   try {
     const commandeRef = db.collection('commandes').doc(commandeId);
     const commandeDoc = await commandeRef.get();
-    
+
     if (!commandeDoc.exists) {
       console.error(`❌ Commande ${commandeId} introuvable`);
       return;
     }
 
     const commande = commandeDoc.data();
-    
+
     if (commande.statut === 'payee' || commande.statut === 'en_cours') {
       console.log(`✅ Commande ${commandeId} déjà traitée (statut: ${commande.statut})`);
       return;
@@ -154,7 +162,7 @@ async function traiterCommandeApprouvee(customMetadata) {
     const secteurActivite = commande.secteurActivite || '';
     const nombreTaches = commande.nombreTaches || 0;
     const serviceId = services[0]?.serviceId || null;
-    
+
     if (nombreTaches === 0) {
       console.error(`❌ Commande ${commandeId} a 0 tâches à créer`);
       await commandeRef.update({
@@ -170,9 +178,7 @@ async function traiterCommandeApprouvee(customMetadata) {
     const demandesRef = db.collection('demandes');
     const maintenant = admin.firestore.FieldValue.serverTimestamp();
 
-    // Récupérer le prix unitaire
     const prixUnitaire = services[0]?.prixUnitaire || 0;
-    // Calculer le gain du créateur (85%) et la commission (15%)
     const gainCreateur = Math.round(prixUnitaire * 0.85);
     const commission = Math.round(prixUnitaire * 0.15);
 
@@ -189,16 +195,14 @@ async function traiterCommandeApprouvee(customMetadata) {
         statut: 'en_attente',
         dateCreation: maintenant,
         sensibilitesExclues: sensibilitesExclues,
-        // Prix et commission
         prixUnitaire: prixUnitaire,
-        gain: gainCreateur,        // 85% du prix unitaire
-        commission: commission,    // 15% du prix unitaire
+        gain: gainCreateur,
+        commission: commission,
         numeroTache: i + 1,
         totalTaches: nombreTaches,
       });
     }
 
-    // Mettre à jour le statut de la commande avec les infos financières
     batch.update(commandeRef, {
       statut: 'en_cours',
       datePaiement: maintenant,
@@ -214,7 +218,7 @@ async function traiterCommandeApprouvee(customMetadata) {
 
   } catch (error) {
     console.error(`❌ Erreur dispatching commande ${commandeId}:`, error);
-    
+
     try {
       await db.collection('commandes').doc(commandeId).update({
         statut: 'erreur_dispatching',
@@ -241,8 +245,8 @@ async function traiterCommandeEchouee(customMetadata) {
   console.log(`Commande ${commandeId} marquée comme paiement échoué`);
 }
 
-module.exports = { 
-  traiterTransactionApprouvee, 
+module.exports = {
+  traiterTransactionApprouvee,
   traiterTransactionEchouee,
   traiterPremiumApprouve,
   traiterDemandeApprouvee,

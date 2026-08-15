@@ -62,6 +62,30 @@ app.post(
 // --- Middlewares ---
 app.use(cors());
 app.use(express.json());
+// --- Vérifier le statut d'une transaction ---
+app.get('/transactions/statut/:transactionId', async (req, res) => {
+  try {
+    const { transactionId } = req.params;
+    
+    if (!transactionId) {
+      return res.status(400).json({ erreur: 'transactionId requis' });
+    }
+
+    const doc = await db.collection('transactions').doc(transactionId).get();
+
+    if (!doc.exists) {
+      return res.status(404).json({ erreur: 'Transaction introuvable' });
+    }
+
+    res.json({ 
+      exists: true, 
+      data: doc.data() 
+    });
+  } catch (err) {
+    console.error('Erreur vérification transaction:', err);
+    res.status(500).json({ erreur: err.message });
+  }
+});
 
 // --- Créer une transaction de paiement ---
 app.post('/transactions/creer', async (req, res) => {
