@@ -29,13 +29,8 @@ async function _enregistrerTransaction(customMetadata, statut) {
   }
 }
 
-/**
- * Point d'entrée unique appelé quand une transaction FedaPay est approuvée.
- */
 async function traiterTransactionApprouvee(customMetadata) {
   console.log('✅ Transaction approuvée:', customMetadata);
-  
-  // Enregistrer la transaction
   await _enregistrerTransaction(customMetadata, 'reussi');
 
   const type = customMetadata?.type;
@@ -55,13 +50,8 @@ async function traiterTransactionApprouvee(customMetadata) {
   }
 }
 
-/**
- * Point d'entrée unique appelé quand une transaction FedaPay échoue.
- */
 async function traiterTransactionEchouee(customMetadata) {
   console.log('❌ Transaction échouée:', customMetadata);
-  
-  // Enregistrer la transaction
   await _enregistrerTransaction(customMetadata, 'echoue');
 
   const type = customMetadata?.type;
@@ -80,7 +70,6 @@ async function traiterTransactionEchouee(customMetadata) {
   }
 }
 
-// --- Premium ---
 async function traiterPremiumApprouve(customMetadata) {
   const { createurId } = customMetadata;
   if (!createurId) {
@@ -101,7 +90,6 @@ async function traiterPremiumApprouve(customMetadata) {
   console.log(`✅ Premium activé pour le créateur ${createurId}`);
 }
 
-// --- Demande simple ---
 async function traiterDemandeApprouvee(customMetadata) {
   const { demandeId } = customMetadata;
   if (!demandeId) {
@@ -129,7 +117,6 @@ async function traiterDemandeEchouee(customMetadata) {
   console.log(`❌ Demande ${demandeId} marquée comme paiement échoué`);
 }
 
-// --- Commande multitâches ---
 async function traiterCommandeApprouvee(customMetadata) {
   const { commandeId, demandeurId } = customMetadata;
 
@@ -163,6 +150,21 @@ async function traiterCommandeApprouvee(customMetadata) {
     const nombreTaches = commande.nombreTaches || 0;
     const serviceId = services[0]?.serviceId || null;
 
+    // ✅ Récupérer le prix de base et les options
+    const service = services[0] || {};
+    const prixBase = service.prixUnitaire || 0;
+    
+    // Calculer le total des options
+    let totalOptions = 0;
+    const optionsDetails = service.optionsDetails || [];
+    for (const option of optionsDetails) {
+      totalOptions += option.prixAdditionnel || 0;
+    }
+    
+    const prixTotalUnitaire = prixBase + totalOptions;
+    const gainCreateur = Math.round(prixTotalUnitaire * 0.85);
+    const commission = Math.round(prixTotalUnitaire * 0.15);
+
     if (nombreTaches === 0) {
       console.error(`❌ Commande ${commandeId} a 0 tâches à créer`);
       await commandeRef.update({
@@ -173,14 +175,13 @@ async function traiterCommandeApprouvee(customMetadata) {
     }
 
     console.log(`📦 Création de ${nombreTaches} tâches pour la commande ${commandeId}`);
+    console.log(`   💰 Prix total unitaire: ${prixTotalUnitaire} F CFA (base: ${prixBase} + options: ${totalOptions})`);
+    console.log(`   💰 Gain créateur: ${gainCreateur} F CFA (85%)`);
+    console.log(`   💰 Commission plateforme: ${commission} F CFA (15%)`);
 
     const batch = db.batch();
     const demandesRef = db.collection('demandes');
     const maintenant = admin.firestore.FieldValue.serverTimestamp();
-
-    const prixUnitaire = services[0]?.prixUnitaire || 0;
-    const gainCreateur = Math.round(prixUnitaire * 0.85);
-    const commission = Math.round(prixUnitaire * 0.15);
 
     for (let i = 0; i < nombreTaches; i++) {
       const demandeDoc = demandesRef.doc();
@@ -195,7 +196,9 @@ async function traiterCommandeApprouvee(customMetadata) {
         statut: 'en_attente',
         dateCreation: maintenant,
         sensibilitesExclues: sensibilitesExclues,
-        prixUnitaire: prixUnitaire,
+        prixUnitaire: prixTotalUnitaire,
+        prixBase: prixBase,
+        totalOptions: totalOptions,
         gain: gainCreateur,
         commission: commission,
         numeroTache: i + 1,
@@ -207,14 +210,13 @@ async function traiterCommandeApprouvee(customMetadata) {
       statut: 'en_cours',
       datePaiement: maintenant,
       tachesCrees: nombreTaches,
+      prixTotalUnitaire: prixTotalUnitaire,
       gainTotalCreateurs: gainCreateur * nombreTaches,
       commissionTotal: commission * nombreTaches,
     });
 
     await batch.commit();
     console.log(`✅ ${nombreTaches} tâches créées pour la commande ${commandeId}`);
-    console.log(`   💰 Gain créateur: ${gainCreateur} F CFA/tâche (85%)`);
-    console.log(`   💰 Commission plateforme: ${commission} F CFA/tâche (15%)`);
 
   } catch (error) {
     console.error(`❌ Erreur dispatching commande ${commandeId}:`, error);
